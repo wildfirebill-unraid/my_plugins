@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE PLUGIN [
   <!ENTITY name      "orphan.images">
-  <!ENTITY author    "community">
+  <!ENTITY author    "wildfirebill">
   <!ENTITY version   "2026.05.21">
-  <!ENTITY pluginURL "https://raw.githubusercontent.com/community/&name;/main/&name;.plg">
+  <!ENTITY pluginURL "https://raw.githubusercontent.com/wildfirebill-unraid/my_plugins/main/orphan_images/&name;.plg">
   <!ENTITY gitBranch "main">
 ]>
 <PLUGIN>
-  <PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" gitURL="https://github.com/community/&name;" gitBranch="&gitBranch;" gitPath="source/">
+  <PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" gitURL="https://github.com/wildfirebill-unraid/my_plugins" gitBranch="&gitBranch;" gitPath="orphan_images/">
     <CHANGES>
       <![CDATA[
         2026.05.21 - Initial release
