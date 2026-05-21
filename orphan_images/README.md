@@ -28,7 +28,7 @@ A plugin for Unraid 6.9+ / 7.x that removes unused (orphan) Docker images on a c
 
 Or install directly from URL:
 ```
-https://raw.githubusercontent.com/community/orphan.images/main/orphan.images.plg
+https://raw.githubusercontent.com/wildfirebill-unraid/my_plugins/main/orphan_images/orphan.images.plg
 ```
 
 ## Standalone Script Usage
