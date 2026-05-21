@@ -167,14 +167,7 @@ exit 0
 /* ------------------------------------------------------------------------ */
 $plugin = "orphan.images";
 $cfg    = "/boot/config/plugins/{$plugin}.cfg";
-
-/* ------------------------------------------------------------------------ */
-/*  Identify the page this is included in                                    */
-/* ------------------------------------------------------------------------ */
 $page_key  = "dockerorphan";
-$page_title = "Docker Orphan Cleaner";
-$page_descr = "Remove unused / orphan Docker images on a schedule.";
-$page_help  = "Scans for and removes Docker images that are no longer associated with any container.";
 
 /* ------------------------------------------------------------------------ */
 /*  Define the settings (defaults)                                           */
@@ -189,192 +182,184 @@ $cfg_defaults = array(
   "ORPHAN_LOG_RETENTION" => "7",
 );
 
-/* ------------------------------------------------------------------------ */
-/*  Unraid 7.x uses $display == "settings" for the Settings section          */
-/* ------------------------------------------------------------------------ */
-if ($display == "settings") {
-  /* ----- Save --------------------------------------------------------- */
-  if ($_POST["action"] == "Save") {
-    $cfg_save = array();
-    foreach ($cfg_defaults as $key => $default) {
-      $val = $_POST[$key] ?? $default;
-      $cfg_save[] = "{$key}=\"{$val}\"";
-    }
-    $cfg_save[] = "";   // trailing newline
-    file_put_contents($cfg, implode("\n", $cfg_save));
+/* ----- Process actions ------------------------------------------------- */
+if ($_POST["action"] == "Save") {
+  $cfg_save = array();
+  foreach ($cfg_defaults as $key => $default) {
+    $val = isset($_POST[$key]) ? $_POST[$key] : $default;
+    $cfg_save[] = "{$key}=\"{$val}\"";
+  }
+  $cfg_save[] = "";
+  file_put_contents($cfg, implode("\n", $cfg_save));
 
-    // Rebuild cron
-    $sched     = $_POST["ORPHAN_SCHEDULE"] ?? "daily";
-    $cron_custom = $_POST["ORPHAN_CRON_STRING"] ?? "";
-    $script    = "/usr/local/emhttp/plugins/{$plugin}/cleanup.sh";
+  $sched     = isset($_POST["ORPHAN_SCHEDULE"]) ? $_POST["ORPHAN_SCHEDULE"] : "daily";
+  $cron_custom = isset($_POST["ORPHAN_CRON_STRING"]) ? $_POST["ORPHAN_CRON_STRING"] : "";
+  $script    = "/usr/local/emhttp/plugins/{$plugin}/cleanup.sh";
 
-    $cron_line = "";
-    switch ($sched) {
-      case "hourly":   $cron_line = "0 * * * *"; break;
-      case "daily":    $cron_line = "0 3 * * *"; break;
-      case "weekly":   $cron_line = "0 3 * * 0"; break;
-      case "monthly":  $cron_line = "0 3 1 * *"; break;
-      case "custom":   $cron_line = $cron_custom; break;
-      default:         $cron_line = "0 3 * * *";
-    }
-
-    if (!empty($cron_line)) {
-      $cron_entry = "{$cron_line} root {$script} >/dev/null 2>&1\n";
-      file_put_contents("/etc/cron.d/{$plugin}", $cron_entry);
-      exec("/usr/bin/killall -HUP crond 2>/dev/null");
-    } else {
-      @unlink("/etc/cron.d/{$plugin}");
-      exec("/usr/bin/killall -HUP crond 2>/dev/null");
-    }
-
-    exec("/usr/local/emhttp/plugins/dynamix/scripts/notify -i normal -s \"Docker Orphan Cleaner\" -d \"Settings saved.\"");
+  $cron_line = "";
+  switch ($sched) {
+    case "hourly":   $cron_line = "0 * * * *"; break;
+    case "daily":    $cron_line = "0 3 * * *"; break;
+    case "weekly":   $cron_line = "0 3 * * 0"; break;
+    case "monthly":  $cron_line = "0 3 1 * *"; break;
+    case "custom":   $cron_line = $cron_custom; break;
+    default:         $cron_line = "";
   }
 
-  /* ----- Run Now ------------------------------------------------------ */
-  if ($_POST["action"] == "Run Now") {
-    $script = "/usr/local/emhttp/plugins/{$plugin}/cleanup.sh";
-    exec("{$script} >/dev/null 2>&1 &");
-    exec("/usr/local/emhttp/plugins/dynamix/scripts/notify -i normal -s \"Docker Orphan Cleaner\" -d \"Cleanup started in background.\"");
+  if (!empty($cron_line)) {
+    $cron_entry = "{$cron_line} root {$script} >/dev/null 2>&1\n";
+    file_put_contents("/etc/cron.d/{$plugin}", $cron_entry);
+    exec("/usr/bin/killall -HUP crond 2>/dev/null");
+  } else {
+    @unlink("/etc/cron.d/{$plugin}");
+    exec("/usr/bin/killall -HUP crond 2>/dev/null");
   }
 
-  /* ----- Load current values ------------------------------------------ */
-  $cfg_vals = $cfg_defaults;
-  if (file_exists($cfg)) {
-    $lines = file($cfg, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    if ($lines) {
-      foreach ($lines as $line) {
-        if (strpos(trim($line), "=") !== false) {
-          list($k, $v) = explode("=", trim($line), 2);
-          $k = trim($k);
-          $v = trim($v, '" ');
-          if (array_key_exists($k, $cfg_vals)) {
-            $cfg_vals[$k] = $v;
-          }
+  exec("/usr/local/emhttp/plugins/dynamix/scripts/notify -i normal -s \"Docker Orphan Cleaner\" -d \"Settings saved.\"");
+}
+
+if ($_POST["action"] == "Run Now") {
+  $script = "/usr/local/emhttp/plugins/{$plugin}/cleanup.sh";
+  exec("{$script} >/dev/null 2>&1 &");
+  exec("/usr/local/emhttp/plugins/dynamix/scripts/notify -i normal -s \"Docker Orphan Cleaner\" -d \"Cleanup started in background.\"");
+}
+
+/* ----- Load current values --------------------------------------------- */
+$cfg_vals = $cfg_defaults;
+if (file_exists($cfg)) {
+  $lines = file($cfg, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+  if ($lines) {
+    foreach ($lines as $line) {
+      if (strpos(trim($line), "=") !== false) {
+        $parts = explode("=", trim($line), 2);
+        $k = trim($parts[0]);
+        $v = trim($parts[1], '" ');
+        if (array_key_exists($k, $cfg_vals)) {
+          $cfg_vals[$k] = $v;
         }
       }
     }
   }
-
-  /* ----- Render the page ----------------------------------------------- */
-  ?>
-  <style>
-    #orphan-settings { margin-top: 8px; }
-    #orphan-settings fieldset { margin-bottom: 12px; }
-    #orphan-settings legend { font-weight: bold; padding: 0 6px; }
-    #orphan-settings table { width: 100%; }
-    #orphan-settings td { padding: 4px 8px; vertical-align: middle; }
-    #orphan-settings .help { color: #888; font-size: 0.9em; }
-    .orphan-buttons { margin: 12px 0; }
-    .orphan-buttons input { margin-right: 8px; }
-  </style>
-
-  <div id="orphan-settings">
-    <form method="POST" action="/Settings/<?= $page_key ?>">
-      <input type="hidden" name="action" value="Save">
-
-      <fieldset>
-        <legend>Schedule</legend>
-        <table>
-          <tr>
-            <td style="width:200px;">Cleanup Frequency</td>
-            <td>
-              <select name="ORPHAN_SCHEDULE" id="ORPHAN_SCHEDULE" onchange="toggleCronCustom()">
-                <option value="hourly"  <?= ($cfg_vals["ORPHAN_SCHEDULE"]=="hourly")  ? "selected" : "" ?>>Hourly</option>
-                <option value="daily"   <?= ($cfg_vals["ORPHAN_SCHEDULE"]=="daily")   ? "selected" : "" ?>>Daily (3:00 AM)</option>
-                <option value="weekly"  <?= ($cfg_vals["ORPHAN_SCHEDULE"]=="weekly")  ? "selected" : "" ?>>Weekly (Sunday 3:00 AM)</option>
-                <option value="monthly" <?= ($cfg_vals["ORPHAN_SCHEDULE"]=="monthly") ? "selected" : "" ?>>Monthly (1st 3:00 AM)</option>
-                <option value="manual"  <?= ($cfg_vals["ORPHAN_SCHEDULE"]=="manual")  ? "selected" : "" ?>>Manual only</option>
-                <option value="custom"  <?= ($cfg_vals["ORPHAN_SCHEDULE"]=="custom")  ? "selected" : "" ?>>Custom cron</option>
-              </select>
-              <span class="help">&nbsp;(cron format: minute hour day month weekday)</span>
-            </td>
-          </tr>
-          <tr id="cron_custom_row" style="<?= ($cfg_vals["ORPHAN_SCHEDULE"]=="custom") ? "" : "display:none" ?>">
-            <td>Custom Cron String</td>
-            <td>
-              <input type="text" name="ORPHAN_CRON_STRING" value="<?= htmlspecialchars($cfg_vals["ORPHAN_CRON_STRING"]) ?>" placeholder="e.g. 0 4 * * *" style="width:220px;">
-              <span class="help">&nbsp;Use 5-field cron syntax</span>
-            </td>
-          </tr>
-        </table>
-      </fieldset>
-
-      <fieldset>
-        <legend>Cleanup Options</legend>
-        <table>
-          <tr>
-            <td style="width:200px;">Remove dangling images</td>
-            <td>
-              <input type="radio" name="ORPHAN_DANGLING" value="yes" <?= ($cfg_vals["ORPHAN_DANGLING"]=="yes")?"checked":"" ?>> Yes
-              <input type="radio" name="ORPHAN_DANGLING" value="no"  <?= ($cfg_vals["ORPHAN_DANGLING"]=="no")?"checked":"" ?>> No
-              <span class="help">&nbsp;Remove &lt;none&gt;:&lt;none&gt; images</span>
-            </td>
-          </tr>
-          <tr>
-            <td>Remove unused images</td>
-            <td>
-              <input type="radio" name="ORPHAN_UNUSED" value="yes" <?= ($cfg_vals["ORPHAN_UNUSED"]=="yes")?"checked":"" ?>> Yes
-              <input type="radio" name="ORPHAN_UNUSED" value="no"  <?= ($cfg_vals["ORPHAN_UNUSED"]=="no")?"checked":"" ?>> No
-              <span class="help">&nbsp;Remove images not used by any container</span>
-            </td>
-          </tr>
-          <tr>
-            <td>Preserve tagged images</td>
-            <td>
-              <input type="radio" name="ORPHAN_LEAVE_TAGGED" value="yes" <?= ($cfg_vals["ORPHAN_LEAVE_TAGGED"]=="yes")?"checked":"" ?>> Yes
-              <input type="radio" name="ORPHAN_LEAVE_TAGGED" value="no"  <?= ($cfg_vals["ORPHAN_LEAVE_TAGGED"]=="no")?"checked":"" ?>> No
-              <span class="help">&nbsp;Skip images that have a repository:tag</span>
-            </td>
-          </tr>
-          <tr>
-            <td>Force removal</td>
-            <td>
-              <input type="radio" name="ORPHAN_FORCE" value="yes" <?= ($cfg_vals["ORPHAN_FORCE"]=="yes")?"checked":"" ?>> Yes
-              <input type="radio" name="ORPHAN_FORCE" value="no"  <?= ($cfg_vals["ORPHAN_FORCE"]=="no")?"checked":"" ?>> No
-              <span class="help">&nbsp;Use <code>docker rmi -f</code></span>
-            </td>
-          </tr>
-        </table>
-      </fieldset>
-
-      <fieldset>
-        <legend>Logging</legend>
-        <table>
-          <tr>
-            <td style="width:200px;">Log retention</td>
-            <td>
-              <select name="ORPHAN_LOG_RETENTION">
-                <?php foreach ([1,3,7,14,30,0] as $d): ?>
-                  <option value="<?= $d ?>" <?= ($cfg_vals["ORPHAN_LOG_RETENTION"]==(string)$d)?"selected":"" ?>>
-                    <?= $d === 0 ? "Keep all" : "{$d} days" ?>
-                  </option>
-                <?php endforeach; ?>
-              </select>
-            </td>
-          </tr>
-        </table>
-      </fieldset>
-
-      <div class="orphan-buttons">
-        <input type="submit" value="Apply">
-      </div>
-    </form>
-
-    <form method="POST" action="/Settings/<?= $page_key ?>" style="display:inline;">
-      <input type="hidden" name="action" value="Run Now">
-      <input type="submit" value="Run Now">
-    </form>
-  </div>
-
-  <script>
-  function toggleCronCustom() {
-    var s = document.getElementById("ORPHAN_SCHEDULE").value;
-    document.getElementById("cron_custom_row").style.display = (s === "custom") ? "" : "none";
-  }
-  </script>
-  <?php
 }
+
+/* ----- Render the page ------------------------------------------------- */
 ?>
+<style>
+  #orphan-settings { margin-top: 8px; }
+  #orphan-settings fieldset { margin-bottom: 12px; }
+  #orphan-settings legend { font-weight: bold; padding: 0 6px; }
+  #orphan-settings table { width: 100%; }
+  #orphan-settings td { padding: 4px 8px; vertical-align: middle; }
+  #orphan-settings .help { color: #888; font-size: 0.9em; }
+  .orphan-buttons { margin: 12px 0; }
+  .orphan-buttons input { margin-right: 8px; }
+</style>
+
+<div id="orphan-settings">
+  <form method="POST" action="/Settings/dockerorphan">
+    <input type="hidden" name="action" value="Save">
+
+    <fieldset>
+      <legend>Schedule</legend>
+      <table>
+        <tr>
+          <td style="width:200px;">Cleanup Frequency</td>
+          <td>
+            <select name="ORPHAN_SCHEDULE" id="ORPHAN_SCHEDULE" onchange="toggleCronCustom()">
+              <option value="hourly"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="hourly")  ? "selected" : "" ?>>Hourly</option>
+              <option value="daily"   <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="daily")   ? "selected" : "" ?>>Daily (3:00 AM)</option>
+              <option value="weekly"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="weekly")  ? "selected" : "" ?>>Weekly (Sunday 3:00 AM)</option>
+              <option value="monthly" <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="monthly") ? "selected" : "" ?>>Monthly (1st 3:00 AM)</option>
+              <option value="manual"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="manual")  ? "selected" : "" ?>>Manual only</option>
+              <option value="custom"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="custom")  ? "selected" : "" ?>>Custom cron</option>
+            </select>
+            <span class="help">&nbsp;(cron format: minute hour day month weekday)</span>
+          </td>
+        </tr>
+        <tr id="cron_custom_row" style="<?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="custom") ? "" : "display:none" ?>">
+          <td>Custom Cron String</td>
+          <td>
+            <input type="text" name="ORPHAN_CRON_STRING" value="<?php echo htmlspecialchars($cfg_vals["ORPHAN_CRON_STRING"]) ?>" placeholder="e.g. 0 4 * * *" style="width:220px;">
+            <span class="help">&nbsp;Use 5-field cron syntax</span>
+          </td>
+        </tr>
+      </table>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cleanup Options</legend>
+      <table>
+        <tr>
+          <td style="width:200px;">Remove dangling images</td>
+          <td>
+            <input type="radio" name="ORPHAN_DANGLING" value="yes" <?php echo ($cfg_vals["ORPHAN_DANGLING"]=="yes")?"checked":"" ?>> Yes
+            <input type="radio" name="ORPHAN_DANGLING" value="no"  <?php echo ($cfg_vals["ORPHAN_DANGLING"]=="no")?"checked":"" ?>> No
+            <span class="help">&nbsp;Remove &lt;none&gt;:&lt;none&gt; images</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Remove unused images</td>
+          <td>
+            <input type="radio" name="ORPHAN_UNUSED" value="yes" <?php echo ($cfg_vals["ORPHAN_UNUSED"]=="yes")?"checked":"" ?>> Yes
+            <input type="radio" name="ORPHAN_UNUSED" value="no"  <?php echo ($cfg_vals["ORPHAN_UNUSED"]=="no")?"checked":"" ?>> No
+            <span class="help">&nbsp;Remove images not used by any container</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Preserve tagged images</td>
+          <td>
+            <input type="radio" name="ORPHAN_LEAVE_TAGGED" value="yes" <?php echo ($cfg_vals["ORPHAN_LEAVE_TAGGED"]=="yes")?"checked":"" ?>> Yes
+            <input type="radio" name="ORPHAN_LEAVE_TAGGED" value="no"  <?php echo ($cfg_vals["ORPHAN_LEAVE_TAGGED"]=="no")?"checked":"" ?>> No
+            <span class="help">&nbsp;Skip images that have a repository:tag</span>
+          </td>
+        </tr>
+        <tr>
+          <td>Force removal</td>
+          <td>
+            <input type="radio" name="ORPHAN_FORCE" value="yes" <?php echo ($cfg_vals["ORPHAN_FORCE"]=="yes")?"checked":"" ?>> Yes
+            <input type="radio" name="ORPHAN_FORCE" value="no"  <?php echo ($cfg_vals["ORPHAN_FORCE"]=="no")?"checked":"" ?>> No
+            <span class="help">&nbsp;Use <code>docker rmi -f</code></span>
+          </td>
+        </tr>
+      </table>
+    </fieldset>
+
+    <fieldset>
+      <legend>Logging</legend>
+      <table>
+        <tr>
+          <td style="width:200px;">Log retention</td>
+          <td>
+            <select name="ORPHAN_LOG_RETENTION">
+              <?php foreach ([1,3,7,14,30,0] as $d): ?>
+                <option value="<?php echo $d ?>" <?php echo ($cfg_vals["ORPHAN_LOG_RETENTION"]==(string)$d)?"selected":"" ?>>
+                  <?php echo $d === 0 ? "Keep all" : "{$d} days" ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </td>
+        </tr>
+      </table>
+    </fieldset>
+
+    <div class="orphan-buttons">
+      <input type="submit" value="Apply">
+    </div>
+  </form>
+
+  <form method="POST" action="/Settings/dockerorphan" style="display:inline;">
+    <input type="hidden" name="action" value="Run Now">
+    <input type="submit" value="Run Now">
+  </form>
+</div>
+
+<script>
+function toggleCronCustom() {
+  var s = document.getElementById("ORPHAN_SCHEDULE").value;
+  document.getElementById("cron_custom_row").style.display = (s === "custom") ? "" : "none";
+}
+</script>
+<?php ?>
         ]]>
       </INLINE>
     </FILE>
@@ -382,13 +367,9 @@ if ($display == "settings") {
     <!-- WebUI: Tab registration (Unraid 7.x style) -->
     <FILE name="/usr/local/emhttp/plugins/orphan.images/orphan.images.conf">
       <INLINE>
-        <![CDATA[---
-PageTitle: "Docker Orphan Cleaner"
+        <![CDATA[PageTitle: "Docker Orphan Cleaner"
 PageKey: "dockerorphan"
 Menu: "settings"
-MenuItemName: "Docker Orphan Cleaner"
-MenuItemDescription: "Schedule removal of orphan Docker images"
-MenuItemIcon: "docker.png"
         ]]>
       </INLINE>
     </FILE>
