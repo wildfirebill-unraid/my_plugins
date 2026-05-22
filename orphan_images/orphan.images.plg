@@ -29,27 +29,22 @@
 <!--  default.cfg                                                  -->
 <!-- ============================================================ -->
 <FILE Name="&emhttpLOC;/default.cfg">
-<INLINE>
-ORPHAN_DANGLING="yes"
+<INLINE><![CDATA[ORPHAN_DANGLING="yes"
 ORPHAN_UNUSED="no"
 ORPHAN_FORCE="no"
 ORPHAN_LEAVE_TAGGED="no"
 ORPHAN_SCHEDULE="daily"
 ORPHAN_CRON_STRING=""
 ORPHAN_LOG_RETENTION="7"
-</INLINE>
+]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  cleanup.sh                                                   -->
 <!-- ============================================================ -->
 <FILE Name="&emhttpLOC;/cleanup.sh" Run="/bin/bash">
-<INLINE>
+<INLINE><![CDATA[
 #!/bin/bash
-# ------------------------------------------------------------
-# Orphan Images Cleaner for Unraid
-# Removes unused/orphan Docker images
-# ------------------------------------------------------------
 set -o pipefail
 
 PLUGIN_NAME="orphan.images"
@@ -137,18 +132,18 @@ cleanup() {
 
 cleanup
 exit 0
-</INLINE>
+]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  apply.sh - runs after settings are saved                     -->
 <!-- ============================================================ -->
 <FILE Name="&emhttpLOC;/apply.sh" Run="/bin/bash">
-<INLINE>
+<INLINE><![CDATA[
 #!/bin/bash
 PLUGIN_NAME="orphan.images"
 CFG_FILE="/boot/config/plugins/${PLUGIN_NAME}/${PLUGIN_NAME}.cfg"
-SCRIPT="&emhttpLOC;/cleanup.sh"
+SCRIPT="/usr/local/emhttp/plugins/${PLUGIN_NAME}/cleanup.sh"
 
 [[ -f "${CFG_FILE}" ]] && source "${CFG_FILE}" || :
 
@@ -176,15 +171,14 @@ else
 fi
 
 exit 0
-</INLINE>
+]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  exec.php - AJAX endpoint for Run Now                         -->
 <!-- ============================================================ -->
 <FILE Name="&emhttpLOC;/exec.php">
-<INLINE>
-<?PHP
+<INLINE><![CDATA[<?PHP
 $plugin = "orphan.images";
 $action = $_POST['action'] ?? '';
 
@@ -199,16 +193,14 @@ switch ($action) {
 }
 
 echo json_encode(['msg' => $msg]);
-?>
-</INLINE>
+?>]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  orphan.images.page - Settings page                            -->
 <!-- ============================================================ -->
 <FILE Name="&emhttpLOC;/orphan.images.page">
-<INLINE>
-Menu="Settings"
+<INLINE><![CDATA[Menu="Settings"
 Title="Docker Orphan Cleaner"
 Icon="trash"
 ---
@@ -348,58 +340,57 @@ function doRunNow() {
 </dl>
 
 <p><small>Log file: /var/log/orphan.images.log</small></p>
-<?PHP ?>
-</INLINE>
+<?PHP ?>]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  Install script                                               -->
 <!-- ============================================================ -->
 <FILE Run="/bin/bash">
-<INLINE>
-mkdir -p &emhttpLOC;
-chmod +x &emhttpLOC;/cleanup.sh &emhttpLOC;/apply.sh 2>/dev/null
-</INLINE>
+<INLINE><![CDATA[
+mkdir -p /usr/local/emhttp/plugins/orphan.images
+chmod +x /usr/local/emhttp/plugins/orphan.images/cleanup.sh /usr/local/emhttp/plugins/orphan.images/apply.sh 2>/dev/null
+]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  Start script (runs on every boot)                            -->
 <!-- ============================================================ -->
 <FILE Run="/bin/bash">
-<INLINE>
-&emhttpLOC;/apply.sh
-</INLINE>
+<INLINE><![CDATA[
+/usr/local/emhttp/plugins/orphan.images/apply.sh
+]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  Stop script                                                  -->
 <!-- ============================================================ -->
 <FILE Run="/bin/bash">
-<INLINE>
+<INLINE><![CDATA[
 rm -f /etc/cron.d/orphan.images 2>/dev/null
 /usr/bin/killall -HUP crond 2>/dev/null || :
-</INLINE>
+]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  Upgrade script                                               -->
 <!-- ============================================================ -->
 <FILE Run="/bin/bash">
-<INLINE>
-mkdir -p &emhttpLOC;
-chmod +x &emhttpLOC;/cleanup.sh &emhttpLOC;/apply.sh 2>/dev/null
-</INLINE>
+<INLINE><![CDATA[
+mkdir -p /usr/local/emhttp/plugins/orphan.images
+chmod +x /usr/local/emhttp/plugins/orphan.images/cleanup.sh /usr/local/emhttp/plugins/orphan.images/apply.sh 2>/dev/null
+]]></INLINE>
 </FILE>
 
 <!-- ============================================================ -->
 <!--  Remove script                                                -->
 <!-- ============================================================ -->
 <FILE Run="/bin/bash">
-<INLINE>
+<INLINE><![CDATA[
 rm -f /etc/cron.d/orphan.images 2>/dev/null
 /usr/bin/killall -HUP crond 2>/dev/null || :
-rm -rf &emhttpLOC; 2>/dev/null
-</INLINE>
+rm -rf /usr/local/emhttp/plugins/orphan.images 2>/dev/null
+]]></INLINE>
 </FILE>
 
 </PLUGIN>
