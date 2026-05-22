@@ -1,41 +1,53 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' standalone='yes'?>
 <!DOCTYPE PLUGIN [
-  <!ENTITY name      "orphan.images">
-  <!ENTITY author    "wildfirebill">
-  <!ENTITY version   "2026.05.21">
-  <!ENTITY pluginURL "https://raw.githubusercontent.com/wildfirebill-unraid/my_plugins/main/orphan_images/&name;.plg">
-  <!ENTITY gitBranch "main">
+<!ENTITY name        "orphan.images">
+<!ENTITY author      "wildfirebill">
+<!ENTITY version     "2026.05.21">
+<!ENTITY launch      "Settings/Docker Orphan Cleaner">
+<!ENTITY pluginURL   "https://raw.githubusercontent.com/wildfirebill-unraid/my_plugins/main/orphan_images/&name;.plg">
+<!ENTITY pluginLOC   "/boot/config/plugins/&name;">
+<!ENTITY emhttpLOC   "/usr/local/emhttp/plugins/&name;">
 ]>
-<PLUGIN>
-  <PLUGIN name="&name;" author="&author;" version="&version;" pluginURL="&pluginURL;" gitURL="https://github.com/wildfirebill-unraid/my_plugins" gitBranch="&gitBranch;" gitPath="orphan_images/">
-    <CHANGES>
-      <![CDATA[
-        2026.05.21 - Initial release
-      ]]>
-    </CHANGES>
-    <FILE name="/usr/local/emhttp/plugins/orphan.images/README.md">
-      <INLINE>
-        <![CDATA[# Orphan Images Cleaner
 
-Removes unused (orphan) Docker images on a schedule.
+<PLUGIN name="&name;"
+        author="&author;"
+        version="&version;"
+        launch="&launch;"
+        pluginURL="&pluginURL;"
+        icon="trash"
+        min="6.9.0"
+        support="https://github.com/wildfirebill-unraid/my_plugins"
+        project="https://github.com/wildfirebill-unraid/my_plugins"
+>
 
-## Features
-- Remove dangling images (none:&lt;none&gt;)
-- Remove unused images not used by any container
-- Configurable schedule (hourly, daily, weekly, monthly, custom cron)
-- Optional force removal
-- Manual "Run Now" button
-- Activity logging
-        ]]>
-      </INLINE>
-    </FILE>
+<CHANGES>
+### 2026.05.21
+- Initial release
+</CHANGES>
 
-    <!-- Main cleanup script -->
-    <FILE name="/usr/local/emhttp/plugins/orphan.images/cleanup.sh">
-      <INLINE>
-        <![CDATA[#!/bin/bash
+<!-- ============================================================ -->
+<!--  default.cfg                                                  -->
+<!-- ============================================================ -->
+<FILE Name="&emhttpLOC;/default.cfg">
+<INLINE>
+ORPHAN_DANGLING="yes"
+ORPHAN_UNUSED="no"
+ORPHAN_FORCE="no"
+ORPHAN_LEAVE_TAGGED="no"
+ORPHAN_SCHEDULE="daily"
+ORPHAN_CRON_STRING=""
+ORPHAN_LOG_RETENTION="7"
+</INLINE>
+</FILE>
+
+<!-- ============================================================ -->
+<!--  cleanup.sh                                                   -->
+<!-- ============================================================ -->
+<FILE Name="&emhttpLOC;/cleanup.sh" Run="/bin/bash">
+<INLINE>
+#!/bin/bash
 # ------------------------------------------------------------
-# Orphan Images Cleaner for Unraid 7.x
+# Orphan Images Cleaner for Unraid
 # Removes unused/orphan Docker images
 # ------------------------------------------------------------
 set -o pipefail
@@ -43,12 +55,10 @@ set -o pipefail
 PLUGIN_NAME="orphan.images"
 LOG_DIR="/var/log"
 LOG_FILE="${LOG_DIR}/${PLUGIN_NAME}.log"
-SETTINGS_FILE="/boot/config/plugins/${PLUGIN_NAME}.cfg"
+SETTINGS_FILE="/boot/config/plugins/${PLUGIN_NAME}/${PLUGIN_NAME}.cfg"
 
-# Load settings
 [[ -f "${SETTINGS_FILE}" ]] && source "${SETTINGS_FILE}" || :
 
-# Defaults
 ORPHAN_DANGLING="${ORPHAN_DANGLING:-yes}"
 ORPHAN_UNUSED="${ORPHAN_UNUSED:-no}"
 ORPHAN_FORCE="${ORPHAN_FORCE:-no}"
@@ -56,76 +66,60 @@ ORPHAN_LEAVE_TAGGED="${ORPHAN_LEAVE_TAGGED:-no}"
 ORPHAN_LOG_RETENTION="${ORPHAN_LOG_RETENTION:-7}"
 
 log() {
-  local timestamp
-  timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-  echo "${timestamp} $*" >> "${LOG_FILE}"
-  echo "${timestamp} $*"
+  local ts
+  ts="$(date '+%Y-%m-%d %H:%M:%S')"
+  echo "${ts} $*" >> "${LOG_FILE}"
+  echo "${ts} $*"
 }
 
 rotate_log() {
   local days="${1:-7}"
   [[ "${days}" -eq 0 ]] && return
-  local log="${LOG_FILE}"
-  [[ ! -f "${log}" ]] && return
-  local age=$(( ($(date +%s) - $(date +%s -r "${log}")) / 86400 ))
-  if [[ "${age}" -gt "${days}" ]]; then
-    mv -f "${log}" "${log}.old" 2>/dev/null || :
-  fi
-}
-
-get_used_image_ids() {
-  docker ps -a --format '{{.ImageID}}' 2>/dev/null | sort -u
+  [[ ! -f "${LOG_FILE}" ]] && return
+  local age=$(( ($(date +%s) - $(date +%s -r "${LOG_FILE}")) / 86400 ))
+  [[ "${age}" -gt "${days}" ]] && mv -f "${LOG_FILE}" "${LOG_FILE}.old" 2>/dev/null || :
 }
 
 cleanup_dangling() {
   local ids
   ids="$(docker images --filter 'dangling=true' -q 2>/dev/null)"
   ids="$(echo "${ids}" | tr -d '[:space:]')"
-  [[ -z "${ids}" ]] && return 0
+  [[ -z "${ids}" ]] && { log "No dangling images."; return 0; }
 
   local count
   count="$(echo "${ids}" | wc -w)"
-  log "Found ${count} dangling image(s). Removing..."
+  log "Found ${count} dangling image(s)."
   local flags=""
   [[ "${ORPHAN_FORCE}" == "yes" ]] && flags="-f"
-
   local removed=0
   for id in ${ids}; do
     if docker rmi ${flags} "${id}" >> "${LOG_FILE}" 2>&1; then
-      log "  Removed dangling image: ${id}"
+      log "  Removed dangling: ${id}"
       removed=$((removed + 1))
     fi
   done
   log "Removed ${removed} dangling image(s)."
-  return "${removed}"
 }
 
 cleanup_unused() {
   local used_ids
-  used_ids="$(get_used_image_ids)"
+  used_ids="$(docker ps -a --format '{{.ImageID}}' 2>/dev/null | sort -u)"
   local removed=0
 
   while IFS='|' read -r repo_tag img_id; do
-    # Skip dangling (handled separately)
     [[ "${repo_tag}" == "<none>:<none>" ]] && continue
-    # Skip tagged images if configured
-    if [[ "${ORPHAN_LEAVE_TAGGED}" == "yes" ]] && [[ "${repo_tag}" != *"<none>"* ]]; then
-      continue
-    fi
-    # Check if image ID is used by any container
-    if echo "${used_ids}" | grep -qF "${img_id}"; then
-      continue
-    fi
-    log "  Removing unused: ${repo_tag} (${img_id})"
+    if [[ "${ORPHAN_LEAVE_TAGGED}" == "yes" ]] && [[ "${repo_tag}" != *"<none>"* ]]; then continue; fi
+    if echo "${used_ids}" | grep -qF "${img_id}"; then continue; fi
     local flags=""
     [[ "${ORPHAN_FORCE}" == "yes" ]] && flags="-f"
     if docker rmi ${flags} "${img_id}" >> "${LOG_FILE}" 2>&1; then
+      log "  Removed unused: ${repo_tag} (${img_id})"
       removed=$((removed + 1))
     fi
   done < <(docker images --format '{{.Repository}}:{{.Tag}}|{{.ID}}' 2>/dev/null)
 
   if [[ "${removed}" -eq 0 ]]; then
-    log "No unused images to remove."
+    log "No unused images removed."
   else
     log "Removed ${removed} unused image(s)."
   fi
@@ -133,363 +127,279 @@ cleanup_unused() {
 
 cleanup() {
   rotate_log "${ORPHAN_LOG_RETENTION}"
-
   log "=== Orphan image cleanup started ==="
-
-  if [[ "${ORPHAN_DANGLING}" == "yes" ]]; then
-    cleanup_dangling
-  fi
-
-  if [[ "${ORPHAN_UNUSED}" == "yes" ]]; then
-    log "Scanning for unused images..."
-    cleanup_unused
-  fi
-
-  # Prune build cache
+  [[ "${ORPHAN_DANGLING}" == "yes" ]] && cleanup_dangling
+  [[ "${ORPHAN_UNUSED}"    == "yes" ]] && { log "Scanning for unused images..."; cleanup_unused; }
   docker builder prune -a -f >> "${LOG_FILE}" 2>&1 || :
-
   log "=== Orphan image cleanup completed ==="
   echo ""
 }
 
 cleanup
 exit 0
-        ]]>
-      </INLINE>
-    </FILE>
+</INLINE>
+</FILE>
 
-    <!-- WebUI: Settings page -->
-    <FILE name="/usr/local/emhttp/plugins/orphan.images/orphan.images.page">
-      <INLINE>
-        <![CDATA[<?PHP
-/* ------------------------------------------------------------------------ */
-/*  Orphan Images - Settings Page                                           */
-/* ------------------------------------------------------------------------ */
+<!-- ============================================================ -->
+<!--  apply.sh - runs after settings are saved                     -->
+<!-- ============================================================ -->
+<FILE Name="&emhttpLOC;/apply.sh" Run="/bin/bash">
+<INLINE>
+#!/bin/bash
+PLUGIN_NAME="orphan.images"
+CFG_FILE="/boot/config/plugins/${PLUGIN_NAME}/${PLUGIN_NAME}.cfg"
+SCRIPT="&emhttpLOC;/cleanup.sh"
+
+[[ -f "${CFG_FILE}" ]] && source "${CFG_FILE}" || :
+
+SCHED="${ORPHAN_SCHEDULE:-daily}"
+CRON_STRING=""
+
+case "${SCHED}" in
+  hourly)  CRON_STRING="0 * * * *" ;;
+  daily)   CRON_STRING="0 3 * * *" ;;
+  weekly)  CRON_STRING="0 3 * * 0" ;;
+  monthly) CRON_STRING="0 3 1 * *" ;;
+  custom)  CRON_STRING="${ORPHAN_CRON_STRING}" ;;
+  *)       CRON_STRING="" ;;
+esac
+
+rm -f /etc/cron.d/${PLUGIN_NAME} 2>/dev/null
+
+if [[ -n "${CRON_STRING}" ]]; then
+  echo "${CRON_STRING} root ${SCRIPT} >/dev/null 2>&1" > /etc/cron.d/${PLUGIN_NAME}
+  /usr/bin/killall -HUP crond 2>/dev/null || :
+  logger "${PLUGIN_NAME}: cron installed: ${CRON_STRING}"
+else
+  /usr/bin/killall -HUP crond 2>/dev/null || :
+  logger "${PLUGIN_NAME}: cron removed (manual mode)"
+fi
+
+exit 0
+</INLINE>
+</FILE>
+
+<!-- ============================================================ -->
+<!--  exec.php - AJAX endpoint for Run Now                         -->
+<!-- ============================================================ -->
+<FILE Name="&emhttpLOC;/exec.php">
+<INLINE>
+<?PHP
 $plugin = "orphan.images";
-$cfg    = "/boot/config/plugins/{$plugin}.cfg";
-$page_key  = "dockerorphan";
+$action = $_POST['action'] ?? '';
 
-/* ------------------------------------------------------------------------ */
-/*  Define the settings (defaults)                                           */
-/* ------------------------------------------------------------------------ */
-$cfg_defaults = array(
-  "ORPHAN_DANGLING"      => "yes",
-  "ORPHAN_UNUSED"        => "no",
-  "ORPHAN_FORCE"         => "no",
-  "ORPHAN_LEAVE_TAGGED"  => "no",
-  "ORPHAN_SCHEDULE"      => "daily",
-  "ORPHAN_CRON_STRING"   => "",
-  "ORPHAN_LOG_RETENTION" => "7",
-);
-
-/* ----- Process actions ------------------------------------------------- */
-if ($_POST["action"] == "Save") {
-  $cfg_save = array();
-  foreach ($cfg_defaults as $key => $default) {
-    $val = isset($_POST[$key]) ? $_POST[$key] : $default;
-    $cfg_save[] = "{$key}=\"{$val}\"";
-  }
-  $cfg_save[] = "";
-  file_put_contents($cfg, implode("\n", $cfg_save));
-
-  $sched     = isset($_POST["ORPHAN_SCHEDULE"]) ? $_POST["ORPHAN_SCHEDULE"] : "daily";
-  $cron_custom = isset($_POST["ORPHAN_CRON_STRING"]) ? $_POST["ORPHAN_CRON_STRING"] : "";
-  $script    = "/usr/local/emhttp/plugins/{$plugin}/cleanup.sh";
-
-  $cron_line = "";
-  switch ($sched) {
-    case "hourly":   $cron_line = "0 * * * *"; break;
-    case "daily":    $cron_line = "0 3 * * *"; break;
-    case "weekly":   $cron_line = "0 3 * * 0"; break;
-    case "monthly":  $cron_line = "0 3 1 * *"; break;
-    case "custom":   $cron_line = $cron_custom; break;
-    default:         $cron_line = "";
-  }
-
-  if (!empty($cron_line)) {
-    $cron_entry = "{$cron_line} root {$script} >/dev/null 2>&1\n";
-    file_put_contents("/etc/cron.d/{$plugin}", $cron_entry);
-    exec("/usr/bin/killall -HUP crond 2>/dev/null");
-  } else {
-    @unlink("/etc/cron.d/{$plugin}");
-    exec("/usr/bin/killall -HUP crond 2>/dev/null");
-  }
-
-  exec("/usr/local/emhttp/plugins/dynamix/scripts/notify -i normal -s \"Docker Orphan Cleaner\" -d \"Settings saved.\"");
+switch ($action) {
+  case 'run_now':
+    $script = "/usr/local/emhttp/plugins/{$plugin}/cleanup.sh";
+    exec("{$script} >/dev/null 2>&1 &");
+    $msg = "Cleanup started.";
+    break;
+  default:
+    $msg = "Unknown action.";
 }
 
-if ($_POST["action"] == "Run Now") {
-  $script = "/usr/local/emhttp/plugins/{$plugin}/cleanup.sh";
-  exec("{$script} >/dev/null 2>&1 &");
-  exec("/usr/local/emhttp/plugins/dynamix/scripts/notify -i normal -s \"Docker Orphan Cleaner\" -d \"Cleanup started in background.\"");
-}
-
-/* ----- Load current values --------------------------------------------- */
-$cfg_vals = $cfg_defaults;
-if (file_exists($cfg)) {
-  $lines = file($cfg, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-  if ($lines) {
-    foreach ($lines as $line) {
-      if (strpos(trim($line), "=") !== false) {
-        $parts = explode("=", trim($line), 2);
-        $k = trim($parts[0]);
-        $v = trim($parts[1], '" ');
-        if (array_key_exists($k, $cfg_vals)) {
-          $cfg_vals[$k] = $v;
-        }
-      }
-    }
-  }
-}
-
-/* ----- Render the page ------------------------------------------------- */
+echo json_encode(['msg' => $msg]);
 ?>
-<style>
-  #orphan-settings { margin-top: 8px; }
-  #orphan-settings fieldset { margin-bottom: 12px; }
-  #orphan-settings legend { font-weight: bold; padding: 0 6px; }
-  #orphan-settings table { width: 100%; }
-  #orphan-settings td { padding: 4px 8px; vertical-align: middle; }
-  #orphan-settings .help { color: #888; font-size: 0.9em; }
-  .orphan-buttons { margin: 12px 0; }
-  .orphan-buttons input { margin-right: 8px; }
-</style>
+</INLINE>
+</FILE>
 
-<div id="orphan-settings">
-  <form method="POST" action="/Settings/dockerorphan">
-    <input type="hidden" name="action" value="Save">
-
-    <fieldset>
-      <legend>Schedule</legend>
-      <table>
-        <tr>
-          <td style="width:200px;">Cleanup Frequency</td>
-          <td>
-            <select name="ORPHAN_SCHEDULE" id="ORPHAN_SCHEDULE" onchange="toggleCronCustom()">
-              <option value="hourly"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="hourly")  ? "selected" : "" ?>>Hourly</option>
-              <option value="daily"   <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="daily")   ? "selected" : "" ?>>Daily (3:00 AM)</option>
-              <option value="weekly"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="weekly")  ? "selected" : "" ?>>Weekly (Sunday 3:00 AM)</option>
-              <option value="monthly" <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="monthly") ? "selected" : "" ?>>Monthly (1st 3:00 AM)</option>
-              <option value="manual"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="manual")  ? "selected" : "" ?>>Manual only</option>
-              <option value="custom"  <?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="custom")  ? "selected" : "" ?>>Custom cron</option>
-            </select>
-            <span class="help">&nbsp;(cron format: minute hour day month weekday)</span>
-          </td>
-        </tr>
-        <tr id="cron_custom_row" style="<?php echo ($cfg_vals["ORPHAN_SCHEDULE"]=="custom") ? "" : "display:none" ?>">
-          <td>Custom Cron String</td>
-          <td>
-            <input type="text" name="ORPHAN_CRON_STRING" value="<?php echo htmlspecialchars($cfg_vals["ORPHAN_CRON_STRING"]) ?>" placeholder="e.g. 0 4 * * *" style="width:220px;">
-            <span class="help">&nbsp;Use 5-field cron syntax</span>
-          </td>
-        </tr>
-      </table>
-    </fieldset>
-
-    <fieldset>
-      <legend>Cleanup Options</legend>
-      <table>
-        <tr>
-          <td style="width:200px;">Remove dangling images</td>
-          <td>
-            <input type="radio" name="ORPHAN_DANGLING" value="yes" <?php echo ($cfg_vals["ORPHAN_DANGLING"]=="yes")?"checked":"" ?>> Yes
-            <input type="radio" name="ORPHAN_DANGLING" value="no"  <?php echo ($cfg_vals["ORPHAN_DANGLING"]=="no")?"checked":"" ?>> No
-            <span class="help">&nbsp;Remove &lt;none&gt;:&lt;none&gt; images</span>
-          </td>
-        </tr>
-        <tr>
-          <td>Remove unused images</td>
-          <td>
-            <input type="radio" name="ORPHAN_UNUSED" value="yes" <?php echo ($cfg_vals["ORPHAN_UNUSED"]=="yes")?"checked":"" ?>> Yes
-            <input type="radio" name="ORPHAN_UNUSED" value="no"  <?php echo ($cfg_vals["ORPHAN_UNUSED"]=="no")?"checked":"" ?>> No
-            <span class="help">&nbsp;Remove images not used by any container</span>
-          </td>
-        </tr>
-        <tr>
-          <td>Preserve tagged images</td>
-          <td>
-            <input type="radio" name="ORPHAN_LEAVE_TAGGED" value="yes" <?php echo ($cfg_vals["ORPHAN_LEAVE_TAGGED"]=="yes")?"checked":"" ?>> Yes
-            <input type="radio" name="ORPHAN_LEAVE_TAGGED" value="no"  <?php echo ($cfg_vals["ORPHAN_LEAVE_TAGGED"]=="no")?"checked":"" ?>> No
-            <span class="help">&nbsp;Skip images that have a repository:tag</span>
-          </td>
-        </tr>
-        <tr>
-          <td>Force removal</td>
-          <td>
-            <input type="radio" name="ORPHAN_FORCE" value="yes" <?php echo ($cfg_vals["ORPHAN_FORCE"]=="yes")?"checked":"" ?>> Yes
-            <input type="radio" name="ORPHAN_FORCE" value="no"  <?php echo ($cfg_vals["ORPHAN_FORCE"]=="no")?"checked":"" ?>> No
-            <span class="help">&nbsp;Use <code>docker rmi -f</code></span>
-          </td>
-        </tr>
-      </table>
-    </fieldset>
-
-    <fieldset>
-      <legend>Logging</legend>
-      <table>
-        <tr>
-          <td style="width:200px;">Log retention</td>
-          <td>
-            <select name="ORPHAN_LOG_RETENTION">
-              <?php foreach ([1,3,7,14,30,0] as $d): ?>
-                <option value="<?php echo $d ?>" <?php echo ($cfg_vals["ORPHAN_LOG_RETENTION"]==(string)$d)?"selected":"" ?>>
-                  <?php echo $d === 0 ? "Keep all" : "{$d} days" ?>
-                </option>
-              <?php endforeach; ?>
-            </select>
-          </td>
-        </tr>
-      </table>
-    </fieldset>
-
-    <div class="orphan-buttons">
-      <input type="submit" value="Apply">
-    </div>
-  </form>
-
-  <form method="POST" action="/Settings/dockerorphan" style="display:inline;">
-    <input type="hidden" name="action" value="Run Now">
-    <input type="submit" value="Run Now">
-  </form>
-</div>
+<!-- ============================================================ -->
+<!--  orphan.images.page - Settings page                            -->
+<!-- ============================================================ -->
+<FILE Name="&emhttpLOC;/orphan.images.page">
+<INLINE>
+Menu="Settings"
+Title="Docker Orphan Cleaner"
+Icon="trash"
+---
+<?PHP
+$plugin = "orphan.images";
+$cfg = parse_plugin_cfg($plugin);
+?>
 
 <script>
 function toggleCronCustom() {
-  var s = document.getElementById("ORPHAN_SCHEDULE").value;
-  document.getElementById("cron_custom_row").style.display = (s === "custom") ? "" : "none";
+  var s = document.getElementById('ORPHAN_SCHEDULE').value;
+  document.getElementById('cron_custom_row').style.display = (s === 'custom') ? '' : 'none';
+}
+function doRunNow() {
+  document.getElementById('run_now_btn').disabled = true;
+  document.getElementById('run_now_btn').value = 'Running...';
+  $.post('/plugins/<?=$plugin?>/exec.php', {action: 'run_now'}, function() {
+    document.getElementById('run_now_btn').disabled = false;
+    document.getElementById('run_now_btn').value = 'Run Now';
+  });
 }
 </script>
-<?php ?>
-        ]]>
-      </INLINE>
-    </FILE>
 
-    <!-- WebUI: Tab registration (Unraid 7.x style) -->
-    <FILE name="/usr/local/emhttp/plugins/orphan.images/orphan.images.conf">
-      <INLINE>
-        <![CDATA[PageTitle: "Docker Orphan Cleaner"
-PageKey: "dockerorphan"
-Menu: "settings"
-        ]]>
-      </INLINE>
-    </FILE>
+<form method="POST" action="/update.php" target="progressFrame">
+<input type="hidden" name="csrf_token" value="<?=$var['csrf_token']?>">
+<input type="hidden" name="#file" value="<?=$plugin?>/<?=$plugin?>.cfg">
+<input type="hidden" name="#command" value="/usr/local/emhttp/plugins/<?=$plugin?>/apply.sh">
 
-    <!-- WebUI: Include for hover help -->
-    <FILE name="/usr/local/emhttp/plugins/orphan.images/orphan.images.help">
-      <INLINE>
-        <![CDATA[<?php
-$help_text = <<<EOT
-  <p><strong>Docker Orphan Images Cleaner</strong></p>
-  <ul>
-    <li><strong>Dangling images</strong> — images without a repository or tag (&lt;none&gt;:&lt;none&gt;). These are safe to remove.</li>
-    <li><strong>Unused images</strong> — images no longer referenced by any container (running or stopped).</li>
-    <li><strong>Preserve tagged images</strong> — skip removal of images that still carry a proper repository:tag label.</li>
-    <li><strong>Force removal</strong> — adds <code>-f</code> to <code>docker rmi</code> to override warnings.</li>
-  </ul>
-  <p>Logs are written to <code>/var/log/orphan.images.log</code>.</p>
-EOT;
-echo $help_text;
-?>
-        ]]>
-      </INLINE>
-    </FILE>
+<fieldset class="settings">
+<legend>Schedule</legend>
 
-    <!-- cron script (wraps cleanup.sh) -->
-    <FILE name="/usr/local/emhttp/plugins/orphan.images/cron_wrapper">
-      <INLINE>
-        <![CDATA[#!/bin/bash
-# Wrapper called by cron
-/usr/local/emhttp/plugins/orphan.images/cleanup.sh >/dev/null 2>&1
-        ]]>
-      </INLINE>
-    </FILE>
+<dl>
+<dt>Cleanup Frequency:</dt>
+<dd>
+<select name="ORPHAN_SCHEDULE" id="ORPHAN_SCHEDULE" onchange="toggleCronCustom()">
+<option value="hourly"  <?=$cfg['ORPHAN_SCHEDULE']=='hourly'?'selected':''?>>Hourly</option>
+<option value="daily"   <?=$cfg['ORPHAN_SCHEDULE']=='daily'?'selected':''?>>Daily (3:00 AM)</option>
+<option value="weekly"  <?=$cfg['ORPHAN_SCHEDULE']=='weekly'?'selected':''?>>Weekly (Sun 3:00 AM)</option>
+<option value="monthly" <?=$cfg['ORPHAN_SCHEDULE']=='monthly'?'selected':''?>>Monthly (1st 3:00 AM)</option>
+<option value="manual"  <?=$cfg['ORPHAN_SCHEDULE']=='manual'?'selected':''?>>Manual only</option>
+<option value="custom"  <?=$cfg['ORPHAN_SCHEDULE']=='custom'?'selected':''?>>Custom cron</option>
+</select>
+</dd>
+</dl>
 
-  </PLUGIN>
+<dl id="cron_custom_row" style="<?=$cfg['ORPHAN_SCHEDULE']=='custom'?'':'display:none'?>">
+<dt>Custom Cron:</dt>
+<dd>
+<input type="text" name="ORPHAN_CRON_STRING" value="<?=htmlspecialchars($cfg['ORPHAN_CRON_STRING'])?>" placeholder="0 4 * * *" size="25">
+<span class="helptext">(minute hour day month weekday)</span>
+</dd>
+</dl>
 
-  <INSTALL>
-    <![CDATA[
-      echo "Installing Orphan Images Cleaner..."
+</fieldset>
 
-      PLUGIN_DIR="/usr/local/emhttp/plugins/orphan.images"
+<fieldset class="settings">
+<legend>Cleanup Options</legend>
 
-      # Create plugin directory
-      mkdir -p "${PLUGIN_DIR}"
+<dl>
+<dt>Remove dangling images:</dt>
+<dd>
+<select name="ORPHAN_DANGLING">
+<option value="yes" <?=$cfg['ORPHAN_DANGLING']=='yes'?'selected':''?>>Yes</option>
+<option value="no"  <?=$cfg['ORPHAN_DANGLING']=='no'?'selected':''?>>No</option>
+</select>
+<span class="helptext">&lt;none&gt;:&lt;none&gt; images with no tag</span>
+</dd>
+</dl>
 
-      # Symlink update script for Unraid plugin system
-      [ ! -f "/boot/config/plugins/orphan.images/orphan.images.cfg" ] && \
-        touch "/boot/config/plugins/orphan.images/orphan.images.cfg" 2>/dev/null
+<dl>
+<dt>Remove unused images:</dt>
+<dd>
+<select name="ORPHAN_UNUSED">
+<option value="yes" <?=$cfg['ORPHAN_UNUSED']=='yes'?'selected':''?>>Yes</option>
+<option value="no"  <?=$cfg['ORPHAN_UNUSED']=='no'?'selected':''?>>No</option>
+</select>
+<span class="helptext">Images not used by any container</span>
+</dd>
+</dl>
 
-      # Make scripts executable
-      chmod +x "${PLUGIN_DIR}/cleanup.sh" "${PLUGIN_DIR}/cron_wrapper" 2>/dev/null
+<dl>
+<dt>Preserve tagged images:</dt>
+<dd>
+<select name="ORPHAN_LEAVE_TAGGED">
+<option value="yes" <?=$cfg['ORPHAN_LEAVE_TAGGED']=='yes'?'selected':''?>>Yes</option>
+<option value="no"  <?=$cfg['ORPHAN_LEAVE_TAGGED']=='no'?'selected':''?>>No</option>
+</select>
+<span class="helptext">Skip images with a repo:tag</span>
+</dd>
+</dl>
 
-      echo "Done."
-    ]]>
-  </INSTALL>
+<dl>
+<dt>Force removal:</dt>
+<dd>
+<select name="ORPHAN_FORCE">
+<option value="yes" <?=$cfg['ORPHAN_FORCE']=='yes'?'selected':''?>>Yes</option>
+<option value="no"  <?=$cfg['ORPHAN_FORCE']=='no'?'selected':''?>>No</option>
+</select>
+<span class="helptext">Use docker rmi -f</span>
+</dd>
+</dl>
 
-  <START>
-    <![CDATA[
-      echo "Starting Orphan Images Cleaner cron..."
+</fieldset>
 
-      PLUGIN_DIR="/usr/local/emhttp/plugins/orphan.images"
-      CFG_FILE="/boot/config/plugins/orphan.images.cfg"
+<fieldset class="settings">
+<legend>Logging</legend>
 
-      # Load settings
-      if [[ -f "${CFG_FILE}" ]]; then
-        source "${CFG_FILE}"
-      fi
+<dl>
+<dt>Log retention:</dt>
+<dd>
+<select name="ORPHAN_LOG_RETENTION">
+<? foreach ([1,3,7,14,30,0] as $d): ?>
+<option value="<?=$d?>" <?=$cfg['ORPHAN_LOG_RETENTION']==(string)$d?'selected':''?>>
+<?=$d===0?'Keep all':"{$d} days"?>
+</option>
+<? endforeach; ?>
+</select>
+</dd>
+</dl>
 
-      SCHED="${ORPHAN_SCHEDULE:-daily}"
-      CRON_STRING=""
+</fieldset>
 
-      case "${SCHED}" in
-        hourly)  CRON_STRING="0 * * * *" ;;
-        daily)   CRON_STRING="0 3 * * *" ;;
-        weekly)  CRON_STRING="0 3 * * 0" ;;
-        monthly) CRON_STRING="0 3 1 * *" ;;
-        custom)  CRON_STRING="${ORPHAN_CRON_STRING}" ;;
-        *)       CRON_STRING="" ;;
-      esac
+<dl>
+<dt>&nbsp;</dt>
+<dd>
+<input type="submit" name="#apply" value="Apply" disabled>
+<input type="button" value="Done" onclick="done()">
+</dd>
+</dl>
+</form>
 
-      if [[ -n "${CRON_STRING}" ]]; then
-        echo "${CRON_STRING} root ${PLUGIN_DIR}/cron_wrapper" > /etc/cron.d/orphan.images
-        killall -HUP crond 2>/dev/null || :
-        echo "Cron installed: ${CRON_STRING}"
-      else
-        echo "Manual mode - no cron installed."
-      fi
+<dl>
+<dt>Manual Run:</dt>
+<dd>
+<input type="button" id="run_now_btn" value="Run Now" onclick="doRunNow()">
+</dd>
+</dl>
 
-      echo "Done."
-    ]]>
-  </START>
+<p><small>Log file: /var/log/orphan.images.log</small></p>
+<?PHP ?>
+</INLINE>
+</FILE>
 
-  <STOP>
-    <![CDATA[
-      echo "Stopping Orphan Images Cleaner..."
-      rm -f /etc/cron.d/orphan.images 2>/dev/null
-      killall -HUP crond 2>/dev/null || :
-      echo "Done."
-    ]]>
-  </STOP>
+<!-- ============================================================ -->
+<!--  Install script                                               -->
+<!-- ============================================================ -->
+<FILE Run="/bin/bash">
+<INLINE>
+mkdir -p &emhttpLOC;
+chmod +x &emhttpLOC;/cleanup.sh &emhttpLOC;/apply.sh 2>/dev/null
+</INLINE>
+</FILE>
 
-  <UPGRADE>
-    <![CDATA[
-      echo "Upgrading Orphan Images Cleaner..."
-      # Re-run install logic
-      PLUGIN_DIR="/usr/local/emhttp/plugins/orphan.images"
-      mkdir -p "${PLUGIN_DIR}"
-      chmod +x "${PLUGIN_DIR}/cleanup.sh" "${PLUGIN_DIR}/cron_wrapper" 2>/dev/null
-      echo "Done."
-    ]]>
-  </UPGRADE>
+<!-- ============================================================ -->
+<!--  Start script (runs on every boot)                            -->
+<!-- ============================================================ -->
+<FILE Run="/bin/bash">
+<INLINE>
+&emhttpLOC;/apply.sh
+</INLINE>
+</FILE>
 
-  <REMOVE>
-    <![CDATA[
-      echo "Removing Orphan Images Cleaner..."
-      rm -f /etc/cron.d/orphan.images 2>/dev/null
-      killall -HUP crond 2>/dev/null || :
-      rm -rf /usr/local/emhttp/plugins/orphan.images 2>/dev/null
-      echo "Done."
-    ]]>
-  </REMOVE>
+<!-- ============================================================ -->
+<!--  Stop script                                                  -->
+<!-- ============================================================ -->
+<FILE Run="/bin/bash">
+<INLINE>
+rm -f /etc/cron.d/orphan.images 2>/dev/null
+/usr/bin/killall -HUP crond 2>/dev/null || :
+</INLINE>
+</FILE>
+
+<!-- ============================================================ -->
+<!--  Upgrade script                                               -->
+<!-- ============================================================ -->
+<FILE Run="/bin/bash">
+<INLINE>
+mkdir -p &emhttpLOC;
+chmod +x &emhttpLOC;/cleanup.sh &emhttpLOC;/apply.sh 2>/dev/null
+</INLINE>
+</FILE>
+
+<!-- ============================================================ -->
+<!--  Remove script                                                -->
+<!-- ============================================================ -->
+<FILE Run="/bin/bash">
+<INLINE>
+rm -f /etc/cron.d/orphan.images 2>/dev/null
+/usr/bin/killall -HUP crond 2>/dev/null || :
+rm -rf &emhttpLOC; 2>/dev/null
+</INLINE>
+</FILE>
 
 </PLUGIN>

@@ -22,13 +22,12 @@ A plugin for Unraid 6.9+ / 7.x that removes unused (orphan) Docker images on a c
 
 ## Installation (Unraid)
 
-1. Copy `orphan.images.plg` to your USB flash drive (`/boot/config/plugins/`)
-2. Go to **Plugins → Install Plugin** → browse and select the file
-3. If the settings page doesn't appear under **Settings**, restart the webUI:
+1. Go to **Plugins → Install Plugin** → paste the URL below or browse for the file
+2. The settings page appears under **Settings → Docker Orphan Cleaner**
+3. If it doesn't show up immediately, refresh the browser page or restart the webUI:
    ```
    /etc/rc.d/rc.nginx restart
    ```
-4. Configure options under **Settings → Docker Orphan Cleaner**
 
 Or install directly from URL:
 ```
